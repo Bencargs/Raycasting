@@ -7,7 +7,8 @@
 	</head>
 	
 	<body>
-		<canvas id="myCanvas"></canvas>
+		<canvas id="minimap"></canvas>
+		<canvas id="view"></canvas>
 	
 		<script>
 		
@@ -17,119 +18,149 @@
 				this.y = y;
 			}
 		}
-		
-		function drawOnImage(image = null) {
-		  const canvasElement = document.getElementById("myCanvas");
-		  const context = canvasElement.getContext("2d");
-
-		  // if an image is present,
-		  // the image passed as a parameter is drawn in the canvas
-		  if (image) {
-			const imageWidth = image.width;
-			const imageHeight = image.height;
-
-			// rescaling the canvas element
-			canvasElement.width = imageWidth;
-			canvasElement.height = imageHeight;
-
-			context.drawImage(image, 0, 0, imageWidth, imageHeight);
-		  }
+			
+		function IndexOf(arr, point) {
+			for (var i = 0; i < arr.length; i++) {
+				if (arr[i].x == point.x && arr[i].y == point.y) {
+					return i;
+				}
+			}
+			return -1;
 		}
 		
-		function fileToDataUri(field) {
-		  return new Promise((resolve) => {
-			const reader = new FileReader();
-
-			reader.addEventListener("load", () => {
-			  resolve(reader.result);
-			});
-
-			reader.readAsDataURL(field);
-		  });
+		function CreateHeightmap(context) {
+			context.drawImage(img, 0, 0);
+			let imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+			const pixel = imageData.data;
+			const r=0, g=1, b=2,a=3;
+			let rgbArray = []
+			for (var p = 0; p < pixel.length; p+=4) {
+				rgbArray.push(pixel[p+r]);
+			}
+			return rgbArray;
 		}
 		
-		var viewDistance = 50;
-		var fieldOfView = 45;
-		var facingAngle = 0;
-		var origin = new Point(50, 50);
+		function GetFieldOfView(origin, facingAngle, fovAngle, viewDistance, heightmap) {
+			let collisionPoints = [];
+			let halfFieldOfView = fovAngle / 2;
+			for (var angle = facingAngle - halfFieldOfView; angle < facingAngle + halfFieldOfView; angle++) {
+				let linePoints = GetLineSegment(origin, viewDistance, angle, heightmap);
+				// todo: this may need to be modified to handle transperancy and object height
+				let point = linePoints[linePoints.length - 1];
+				
+				let index = IndexOf(collisionPoints, point);
+				if(index === -1) {
+					collisionPoints.push(point);
+				}
+			}
+			return collisionPoints;
+		}
 		
-		//var canvas = document.getElementById("myCanvas");
-		//var context = canvas.getContext("2d");	
-		//var heightmapImage = new Image();
-		//heightmapImage.addEventListener(
-		//  "load",
-		//  () => { 
-		//	context.drawImage(heightmapImage, 0, 0);
-		//  },
-		//  false
-		//);
-		//heightmapImage.src = 'map3.bmp';
-		//
-		//
-		//var imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-		//const pixel = imageData.data;
-        //let rgbArray = []
-		//const r=0, g=1, b=2,a=3;
-		//for (var p = 0; p<pixel.length; p+=4)
-        //{
-		//	pixel[p+r] = 127;
-		//	pixel[p+g] = 127;
-		//	pixel[p+b] = 127;
-        //}
-		//context.putImageData(imageData,0,0);
+		function GetLineSegment(center, radius, angle, heightmap) {
+			let lineSegment = [];
+			for (var d = 1; d < radius; d++) {
+				let point = GetPointOnCircle(center, d, angle);
+				let index = point.x + (point.y * 300); // canvas.width = 300
+				if (heightmap[index])
+					break;
+				
+				lineSegment.push(point);
+			}
+			return lineSegment;
+		}
+
+		function GetPointOnCircle(center, radius, angle) {
+			let a = angle - 90; // random bug - 0 angle points to is rotated 90 degrees
+			let x = Math.round(center.x + radius * Math.cos(a * Math.PI / 180));
+			let y = Math.round(center.y + radius * Math.sin(a * Math.PI / 180));
+			return new Point(x, y);
+		}
 		
-		//const image = document.createElement("img");
-		//'image.src = await fileToDataUri('map3.bmp');
-		//drawOnImage(image);
+		function GetDistance(a, b) {
+			return Math.sqrt(Math.pow(b.x - a.x, 2) + Math.pow(b.y - a.y , 2));
+		}
+		
+		function CreateGradientPen(origin, destination, colourA, colourB) {
+			let gradientPen = context.createLinearGradient(origin.x, origin.y, destination.x, destination.y);
+			gradientPen.addColorStop(0, colourA);
+			gradientPen.addColorStop(1, colourB);
+			return gradientPen;
+		}
+		
+		function DrawLine(origin, destination) {
+			context.beginPath();
+			context.moveTo(origin.x, origin.y);
+			context.lineTo(destination.x, destination.y);
+			context.stroke();
+		}
+		
+		async function sleep(ms) {
+			return new Promise(resolve => setTimeout(resolve, ms));
+		}
+		
+		async function DrawScene(heightmap, facingAngle) {
+			context.drawImage(img, 0, 0);
+		  
+		    viewContext.fillStyle = "cornflowerblue";
+			viewContext.fillRect(0, 0, canvas.width, canvas.height);
+		  
+			viewContext.fillStyle = "burlywood";
+			viewContext.fillRect(0, canvas.height / 2, view.width, view.height);
+			
+			let rayCastPoints = GetFieldOfView(origin, facingAngle, fieldOfView, viewDistance, heightmap);
+			
+			let maxDistance = GetPointOnCircle(origin, viewDistance, facingAngle);
+			
+			for (var p = 0; p < rayCastPoints.length; p++) {
+				context.strokeStyle = CreateGradientPen(origin, maxDistance, "white", "black");
+				DrawLine(origin, rayCastPoints[p]);
+				
+				let distance = GetDistance(origin, rayCastPoints[p]);
+				if (distance > (viewDistance - 2)) 
+					continue; // 2 because ray starts at 1, and should end before viewDistance
+				
+				// Calculate horizontal raster size
+				var rayCount = rayCastPoints.length;
+				var rayIndex = rayCastPoints.indexOf(rayCastPoints[p]);
+				var rasterWidth = (1 / rayCount) * canvas.width;
+				var rasterIndex = (rayIndex / rayCount) * canvas.width;
+				
+				// Calculate the vertical raster size
+				var distancePercent = distance / viewDistance;
+				var drawHeightFloor = canvas.height - (distancePercent * canvas.height);
+				var drawHeightCeil = (canvas.height / 2) - (drawHeightFloor / 2);
+				
+				// Calculate colour shade based on distance of the ray
+				var shadeColour = 255 - (distancePercent * 255);
+				viewContext.fillStyle = "rgb(" + shadeColour + ", " + shadeColour + ", " + shadeColour + ")";
+				
+				viewContext.beginPath();
+				viewContext.fillRect(rasterIndex, drawHeightCeil, rasterWidth, drawHeightFloor);
+				viewContext.stroke();
+			}
+		}
+		
+		let viewDistance = 50;
+		let fieldOfView = 45;
+		let facingAngle = 0;
+		let origin = new Point(50, 50);
 		
 		const img = new Image();
-		img.crossOrigin = "anonymous";
-		img.src = "./resources/map3.bmp";
-		const canvas = document.getElementById("myCanvas");
-		const ctx = canvas.getContext("2d");
-		img.addEventListener("load", () => {
-		  ctx.drawImage(img, 0, 0);
-		  img.style.display = "none";
+		img.crossOrigin = 'anonymous';
+		img.src = 'https://raw.githubusercontent.com/Bencargs/Raycasting/master/resources/map3.bmp';
+		const canvas = document.getElementById('minimap');
+		const context = canvas.getContext('2d', { willReadFrequently: true });
+		const viewCanvas = document.getElementById('view');
+		const viewContext = viewCanvas.getContext('2d', { willReadFrequently: true });
+		
+		img.addEventListener('load', () => {
+			let heightmap = CreateHeightmap(context);
+			function Update() {
+				facingAngle = ++facingAngle % 360;
+				DrawScene(heightmap, facingAngle);
+			}
+			setInterval(Update, 10);
 		});
-
-		function pick(event, destination) {
-		  const bounding = canvas.getBoundingClientRect();
-		  const x = event.clientX - bounding.left;
-		  const y = event.clientY - bounding.top;
-		  const pixel = ctx.getImageData(x, y, 1, 1);
-		  const data = pixel.data;
-
-		  const rgba = `rgba(${data[0]}, ${data[1]}, ${data[2]}, ${data[3] / 255})`;
-		  destination.style.background = rgba;
-		  destination.textContent = rgba;
-
-		  return rgba;
-		}
-
-		canvas.addEventListener("mousemove", (event) => 
-		{
-			let asdsa  = 42;
-			pick(event, 42);
-		});
-//canvas.addEventListener("click", (event) => pick(event, selectedColor));
-		
-		
-		
-		//var test = context.getImageData(0, 0, 100, 100);
-		//context.fillStyle = `rgba(${127}, ${127}, ${127}, ${127})`;
-		//context.fillRect(0, 0, 50, 50);
-		//context.putImageData(context, test, 50, 50);
-		
-		
-		//var heightmap = context.getImageData(0, 0, 100, 100);
-		//for (var x = 0; x < 100; x++) {
-		//	for (var y = 0; y < 100; y++) {
-		//		let k= GetPixel(heightmap, x, y);
-		//		if (k != 0)
-		//			console.log(k);
-		//	}
-		//}
-		
 		</script> 
 	</body>
 </html>

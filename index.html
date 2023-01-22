@@ -7,6 +7,7 @@
 	<body>
 		<canvas id="minimap"></canvas>
 		<canvas id="view"></canvas>
+		<div id="instructions">Controls: <b>WSAD</b> to move, <b>QE</b> to strafe</div>
 	
 		<script>
 		
@@ -46,20 +47,23 @@
 				// todo: this may need to be modified to handle transperancy and object height
 				let point = linePoints[linePoints.length - 1];
 				
-				let index = IndexOf(collisionPoints, point);
-				if(index === -1) {
+				if(point != null && IndexOf(collisionPoints, point) === -1) {
 					collisionPoints.push(point);
 				}
 			}
 			return collisionPoints;
 		}
 		
+		function GetHeight(point, heightmap) {
+			let index = point.x + (point.y * 300); // canvas.width = 300
+			return heightmap[index];
+		}
+		
 		function GetLineSegment(center, radius, angle, heightmap) {
 			let lineSegment = [];
 			for (var d = 1; d < radius; d++) {
 				let point = GetPointOnCircle(center, d, angle);
-				let index = point.x + (point.y * 300); // canvas.width = 300
-				if (heightmap[index])
+				if (GetHeight(point, heightmap) != 0)
 					break;
 				
 				lineSegment.push(point);
@@ -92,8 +96,23 @@
 			context.stroke();
 		}
 		
-		async function sleep(ms) {
-			return new Promise(resolve => setTimeout(resolve, ms));
+		function DrawRectangle(x, y, width, height) {
+			viewContext.beginPath();
+			viewContext.fillRect(x, y, width, height);
+			viewContext.stroke();
+		}
+		
+		function IsInBounds(point) {
+			return point.x > 0 && point.x < 99 &&
+				   point.y > 0 && point.y < 99;
+		}
+		
+		function Move(origin, distance, angle) {
+			let point = GetPointOnCircle(origin, distance, angle); 
+			if (IsInBounds(point) && GetHeight(point, heightmap) == 0)
+				origin = point; 
+
+			return origin;
 		}
 		
 		async function DrawScene(heightmap, facingAngle) {
@@ -131,10 +150,7 @@
 				// Calculate colour shade based on distance of the ray
 				var shadeColour = 255 - (distancePercent * 255);
 				viewContext.fillStyle = "rgb(" + shadeColour + ", " + shadeColour + ", " + shadeColour + ")";
-				
-				viewContext.beginPath();
-				viewContext.fillRect(rasterIndex, drawHeightCeil, rasterWidth, drawHeightFloor);
-				viewContext.stroke();
+				DrawRectangle(rasterIndex, drawHeightCeil, rasterWidth, drawHeightFloor);
 			}
 		}
 		
@@ -151,13 +167,21 @@
 		const viewCanvas = document.getElementById('view');
 		const viewContext = viewCanvas.getContext('2d', { willReadFrequently: true });
 		
+		var heightmap;
 		img.addEventListener('load', () => {
-			let heightmap = CreateHeightmap(context);
-			function Update() {
-				facingAngle = ++facingAngle % 360;
-				DrawScene(heightmap, facingAngle);
+			heightmap = CreateHeightmap(context);
+			DrawScene(heightmap, facingAngle);
+		});
+		window.addEventListener('keydown', function (event) {
+			switch (event.key) {
+				case 'w': origin = Move(origin, 1, facingAngle); break; // todo: the forward collision check fails sometimes..?!
+				case 's': origin = Move(origin, -1, facingAngle); break;
+				case 'a': facingAngle--; DrawScene(heightmap, facingAngle); break;
+				case 'd': facingAngle++; DrawScene(heightmap, facingAngle); break;
+				case 'q': origin = Move(origin, 1, -90 + facingAngle); break;
+				case 'e': origin = Move(origin, 1, 90 + facingAngle); break;
 			}
-			setInterval(Update, 10);
+			DrawScene(heightmap, facingAngle);
 		});
 		</script> 
 	</body>
